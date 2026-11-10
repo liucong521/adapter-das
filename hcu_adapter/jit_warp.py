@@ -41,7 +41,8 @@ LOG = logging.getLogger("hcu.adapter")
 _RELPATH = "include/sgl_kernel/warp.cuh"
 
 _NEEDLE = "__hip_bfloat162 _v;"
-_REPL = "T _v;  // HCU adapter: receiver type follows T (bf16x2 keeps its packed-bit branch)"
+_LEGACY_REPL = "T _v;  // HCU adapter: receiver type follows T (bf16x2 keeps its packed-bit branch)"
+_REPL = "T _v;"
 
 # (needle, replacement): *_sync -> plain, mask dropped. Needles include the
 # trailing ';' so the idempotency tag lands AFTER the statement — v1 of this
@@ -68,34 +69,45 @@ def _apply(root, register):
     changed = False
 
     # -- patch 1: reduce<T> receiver type --------------------------------
-    if _REPL in text:
+    from hcu_adapter.jit_quant_fp8 import _PATCHES_WARP
+
+    if _LEGACY_REPL in text:
+        text = text.replace(_LEGACY_REPL, _REPL)
+        changed = True
+    known = all(
+        needle in text or replacement in text
+        or replacement.replace(_REPL, _NEEDLE) in text
+        for _path, needle, replacement in _PATCHES_WARP
+    )
+    if not known:
+        raise RuntimeError(
+            f"jit_warp: unsupported HIP reduction layout in {_RELPATH} -- "
+            "upstream changed; re-derive (governance §3)"
+        )
+    if all(replacement in text for _path, _needle, replacement in _PATCHES_WARP):
         LOG.warning(
             "HCU adapter: JIT warp reduce patch already installed (%s)",
             _RELPATH,
         )
     else:
         n = text.count(_NEEDLE)
-        if n == 0:
-            raise RuntimeError(
-                f"jit_warp: needle missing in {_RELPATH}: {_NEEDLE!r} -- "
-                "upstream changed; re-derive (governance §3)"
+        if n:
+            text = text.replace(_NEEDLE, _REPL)
+            changed = True
+            # One allowlist record per needle (fingerprint is (op, detail); both
+            # loop occurrences share the needle, so a single record covers them).
+            register(
+                "per_token_quant",  # the failing instantiation: fp32 warp max in
+                # the indexer k-store; catalog has no warp-primitive entry
+                "gfx93x-hipcc-portability",
+                target=f"text:sglang/kernels/jit/{_RELPATH}",
+                mechanism=_reg.MECH_TEXT,
+                detail=_NEEDLE,
             )
-        text = text.replace(_NEEDLE, _REPL)
-        changed = True
-        # One allowlist record per needle (fingerprint is (op, detail); both
-        # loop occurrences share the needle, so a single record covers them).
-        register(
-            "per_token_quant",  # the failing instantiation: fp32 warp max in
-            # the indexer k-store; catalog has no warp-primitive entry
-            "gfx93x-hipcc-portability",
-            target=f"text:sglang/kernels/jit/{_RELPATH}",
-            mechanism=_reg.MECH_TEXT,
-            detail=_NEEDLE,
-        )
-        LOG.warning(
-            "HCU adapter: JIT warp reduce portability patch installed (%d edits)",
-            n,
-        )
+            LOG.warning(
+                "HCU adapter: JIT warp reduce portability patch installed (%d edits)",
+                n,
+            )
 
     # -- patch 2: shfl *_sync -> plain ------------------------------------
     for needle, repl in _SHFL_MAP:

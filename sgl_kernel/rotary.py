@@ -185,13 +185,13 @@ def _rotary_embedding_interleaved_torch(positions, query, key, head_size, cos_si
             return None
         orig_shape = t.shape
         t = t.view(num_tokens, -1, head_size)
-        x1 = t[..., :rotary_dim, 0::2].float()  # even lanes
-        x2 = t[..., :rotary_dim, 1::2].float()  # odd lanes
+        x1 = t[..., :rotary_dim:2].float()  # even lanes
+        x2 = t[..., 1:rotary_dim:2].float()  # odd lanes
         y1 = x1 * cos_i.unsqueeze(1) - x2 * sin_i.unsqueeze(1)
         y2 = x1 * sin_i.unsqueeze(1) + x2 * cos_i.unsqueeze(1)
         out = t.clone()
-        out[..., :rotary_dim, 0::2] = y1.to(t.dtype)
-        out[..., :rotary_dim, 1::2] = y2.to(t.dtype)
+        out[..., :rotary_dim:2] = y1.to(t.dtype)
+        out[..., 1:rotary_dim:2] = y2.to(t.dtype)
         return out.view(orig_shape)
 
     out_q = _rope(query)

@@ -267,13 +267,23 @@ def install():
 
         shim.set_pdl = _set_pdl
 
-    # v0.5.21 mHC pre GEMM: upstream name tf32_hc_prenorm_gemm, DTK fork spells
-    # it pernorm; identical (a, b, d, sqr_sum, num_splits) signature.
+    # The DTK pernorm alias crashes on the current 0.5.22 mHC split-K call
+    # (K=20480, N=24). Serve the existing checked public contract instead;
+    # no platform, fusion, or model-default flags change.
     if (
         getattr(shim, "tf32_hc_prenorm_gemm", None) is None
         and getattr(deepgemm, "tf32_hc_pernorm_gemm", None) is not None
     ):
-        shim.tf32_hc_prenorm_gemm = deepgemm.tf32_hc_pernorm_gemm
+        from .kernels.mhc_emu import tf32_hc_prenorm_gemm
+        from . import registry
+
+        shim.tf32_hc_prenorm_gemm = tf32_hc_prenorm_gemm
+        registry.register(
+            "deep_gemm.tf32_hc_prenorm_gemm",
+            "hcu_adapter.kernels.mhc_emu.tf32_hc_prenorm_gemm",
+            "deep_gemm.tf32_hc_prenorm_gemm",
+            registry.MECH_SEAM,
+        )
 
     # v0.5.21 dense fp8 w8a8 block-linear (Glm5Next FP8 checkpoints): sglang
     # entrypoint.gemm_nt_f8f8bf16 calls deep_gemm.fp8_gemm_nt(lhs, rhs, out).

@@ -83,7 +83,7 @@ _NEEDLE_SHFL = (
 )
 _REPL_SHFL = (
     "#else\n"
-    "      __hip_bfloat162 _v;\n"
+    "      T _v;\n"
     "      if constexpr (std::is_same_v<T, __hip_bfloat162>) {\n"
     "        unsigned int _b = *reinterpret_cast<unsigned int*>(&value);\n"
     "        _b = __shfl_xor(_b, mask, kStart);\n"

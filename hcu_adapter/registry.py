@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import sys
+import types
 
 LOG = logging.getLogger("hcu.adapter")
 
@@ -68,6 +69,8 @@ TEXT_PATCH_ALLOWLIST = {
     # 448.0f and the packed convert at the DTK __hip_cvt family (OCP e4m3
     # == CUDA e4m3_fn; deep_gemm EP runner needs this JIT kernel).
     ("per_token_quant", "static constexpr float kMaxValue = DTypeTrait<fp8_e4m3_t>::kFloatMax;"),
+    ("per_token_quant", "reinterpret_cast<__nv_fp8x2_storage_t*>(&output_buf)"),
+    ("per_token_quant", "__nv_cvt_float2_to_fp8x2(outputx2, __NV_SATFINITE, __NV_E4M3)"),
     # v0.5.22 per-token-group quant JIT: DTK hipcc declares plain __all but
     # not the mask-form __all_sync, killing the whole module family at name
     # lookup (glm53f decode graph capture, 2026-10-20). Full-mask vote from
@@ -371,10 +374,18 @@ def register(op, impl, target, mechanism, role=ROLE_ACTIVE, source=None,
             " duplicate patches are forbidden -- extend the existing entry"
         )
     _BOUND[target] = op
+    if impl is None:
+        impl_name = "None"
+    elif isinstance(impl, str):
+        impl_name = str.__repr__(impl)
+    elif type(impl) in (types.FunctionType, types.BuiltinFunctionType, types.MethodType, type):
+        impl_name = impl.__qualname__
+    else:
+        impl_name = type(impl).__qualname__
     _RECORDS[op] = {
         "op": op,
-        "impl": getattr(impl, "__qualname__", repr(impl)) if impl is not None else repr(impl),
-        "implementation": impl if isinstance(impl, str) else getattr(impl, "__qualname__", repr(impl)),
+        "impl": impl_name,
+        "implementation": impl if isinstance(impl, str) else impl_name,
         "target": target,
         "mechanism": mechanism,
         "role": role,
